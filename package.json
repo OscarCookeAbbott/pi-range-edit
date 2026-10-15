@@ -1,5 +1,5 @@
 {
-  "name": "@oscarcookeabbott/pi-range-edit",
+  "name": "@oscar-robin/pi-range-edit",
   "version": "0.1.0",
   "description": "Line-range editing for Pi with exact boundary checks and explicit version acknowledgement.",
   "type": "module",
