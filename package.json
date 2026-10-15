@@ -1,0 +1,42 @@
+{
+  "name": "@oscarcookeabbott/pi-range-edit",
+  "version": "0.1.0",
+  "description": "Line-range editing for Pi with exact boundary checks and explicit version acknowledgement.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Oscar Cooke-Abbott",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OscarCookeAbbott/pi-range-edit.git"
+  },
+  "homepage": "https://github.com/OscarCookeAbbott/pi-range-edit#readme",
+  "bugs": {
+    "url": "https://github.com/OscarCookeAbbott/pi-range-edit/issues"
+  },
+  "keywords": ["pi-package", "pi-extension", "editing", "line-ranges"],
+  "files": ["src/", "README.md", "LICENSE", "CHANGELOG.md", "CONTRIBUTING.md"],
+  "pi": {
+    "extensions": ["./src/index.ts"]
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "check": "tsc --noEmit",
+    "test": "node --test test/*.test.ts",
+    "prepack": "npm run check && npm test"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    "typebox": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-ai": "1.2.0",
+    "@earendil-works/pi-coding-agent": "1.2.0",
+    "@earendil-works/pi-tui": "1.2.0",
+    "@types/node": "22.19.19",
+    "typebox": "1.3.27",
+    "typescript": "7.0.2"
+  }
+}
