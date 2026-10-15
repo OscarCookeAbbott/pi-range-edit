@@ -10,7 +10,7 @@ Requires Node 22.19 or newer and Pi. Tested against **Pi 1.2.0**; older Pi relea
 pi install git:github.com/OscarCookeAbbott/pi-range-edit
 ```
 
-Start a new session or run `/reload`. For a pinned release, append `@v0.1.0` to the source. Unpinned installs follow the repository's default branch when running `pi update --extensions`.
+Start a new session or run `/reload`. For a pinned release, append `@v0.2.0` to the source. Unpinned installs follow the repository's default branch when running `pi update --extensions`.
 
 Use `pi install --local <source>` for a project-scoped installation; Pi loads it after project trust is granted. To uninstall:
 
@@ -41,6 +41,7 @@ Read the file normally, then provide its first/last boundary lines and only the 
 - Boundary text must match exactly, including indentation, without a newline. A leading file BOM is not part of the first boundary line.
 - Start candidates are searched within ±20 lines by default. The end must match at **the same displacement**, preserving the expected range length. The end is never independently searched.
 - A unique pair is required, even if one of several pairs is at the requested coordinates. No nearest-match or approximate-content guessing.
+- Failures distinguish missing starts from ends that do not match at the required offset. Diagnostic lists show at most five examples, with the full count when more exist.
 - Up to 32 disjoint edits resolve against the same original file. Missing/ambiguous boundaries, invalid ranges, and overlaps reject the batch before writing.
 - Optional per-call `maxLineShift` can narrow the configured radius. `0` explicitly requires exact current coordinates, useful for intentional edits to repetitive lines.
 - Results show requested/resolved ranges, replacement coordinates, and a diff. Replacement EOLs use the first affected line's style (or the file's first EOL). A nonempty replacement inherits the replaced range's terminating newline if omitted; an explicit trailing newline at an unterminated EOF is honoured. Untouched bytes, BOM, and existing file permissions are preserved.
@@ -84,7 +85,7 @@ Merge into `~/.pi/agent/settings.json`, or trusted project `.pi/settings.json`:
 }
 ```
 
-Run `/reload` after changing settings. `maxLineShift` must be an integer from 0 to 1000; `maxFileBytes` a positive safe integer (default 8 MiB, for both original and resulting files). Invalid configuration warns and uses defaults. The tool supports existing UTF-8 regular files without NUL bytes. Use `write` for new/empty-file creation.
+Run `/reload` after changing settings. `maxLineShift` must be an integer from 0 to 1000; `maxFileBytes` a positive safe integer (default 8 MiB, for both original and resulting files). Invalid configuration warns and uses defaults. The tool supports existing UTF-8 regular files without NUL bytes. Replacement output must meet the same text constraint; NUL bytes and malformed Unicode are rejected before writing or creating a pending proposal. Use `write` for new/empty-file creation.
 
 ## Safety boundaries
 

@@ -131,6 +131,24 @@ test("symlink aliases share version identity, but a pending edit cannot follow a
   assert.equal(await readFile(other, "utf8"), original.replace("old", "new"));
 });
 
+test("invalid replacement text rejects the entire batch before writing or proposing it", async (t) => {
+  const { path, editor } = await fixture(t);
+  for (const trusted of [true, false]) {
+    editor.reset();
+    if (trusted) editor.recordRead(path, digest(original));
+    for (const newText of ["bad\0text", "bad\uD800text", "bad\uDC00text"]) {
+      await assert.rejects(editor.edit({ path, edits: [
+        { start: { line: 1, text: "header" }, newText: "changed" },
+        { start: { line: 3, text: "old" }, newText },
+      ] }, "/"), /Replacement.*UTF-8.*NUL/);
+      assert.deepEqual(await readFile(path), Buffer.from(original));
+    }
+  }
+  editor.recordRead(path, digest(original));
+  await editor.edit({ path, edits: [{ start: { line: 3, text: "old" }, newText: "🐈 e\u0301" }] }, "/");
+  assert.equal(await readFile(path, "utf8"), original.replace("old", "🐈 e\u0301"));
+});
+
 test("configuration, file limits, invalid encoding and invalid batches fail before writing", async (t) => {
   assert.deepEqual(readConfig({}), DEFAULT_CONFIG);
   assert.equal(readConfig({ rangeEdit: { maxLineShift: 0 } }).maxLineShift, 0);

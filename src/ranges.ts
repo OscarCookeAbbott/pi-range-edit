@@ -38,6 +38,11 @@ function validateBoundary(boundary: Boundary): void {
   }
 }
 
+function describeMatches(starts: readonly number[], length?: number): string {
+  const shown = starts.slice(0, 5).map((start) => length === undefined ? `${start + 1}` : `${start + 1}–${start + length + 1}`).join(", ");
+  return shown + (starts.length > 5 ? ` (${starts.length} matches; first 5 shown)` : "");
+}
+
 export function planEdits(content: string, edits: readonly RangeEdit[], maxLineShift: number): { content: string; ranges: ResolvedRange[] } {
   if (!Number.isSafeInteger(maxLineShift) || maxLineShift < 0 || maxLineShift > 1000) throw new Error("maxLineShift must be an integer between 0 and 1000.");
   if (!Array.isArray(edits) || !edits.length || edits.length > 32) throw new Error("Provide between 1 and 32 edits to one file.");
@@ -51,13 +56,19 @@ export function planEdits(content: string, edits: readonly RangeEdit[], maxLineS
     if (typeof edit.newText !== "string") throw new Error(`edits[${editIndex}]: newText is required; use an empty string to delete.`);
     const length = end.line - edit.start.line;
     const candidates: number[] = [];
+    const starts: number[] = [];
     const lower = Math.max(0, edit.start.line - 1 - maxLineShift);
-    const upper = Math.min(lines.length - length - 1, edit.start.line - 1 + maxLineShift);
+    const upper = Math.min(lines.length - 1, edit.start.line - 1 + maxLineShift);
     for (let start = lower; start <= upper; start++) {
-      if (lines[start].text === edit.start.text && lines[start + length].text === end.text) candidates.push(start);
+      if (lines[start].text !== edit.start.text) continue;
+      starts.push(start);
+      if (lines[start + length]?.text === end.text) candidates.push(start);
     }
     if (candidates.length !== 1) {
-      const reason = candidates.length ? `Ambiguous ranges at lines ${candidates.map((start) => `${start + 1}–${start + length + 1}`).join(", ")}` : "No matching boundary pair";
+      let reason: string;
+      if (candidates.length) reason = `Ambiguous ranges at lines ${describeMatches(candidates, length)}`;
+      else if (starts.length) reason = `No matching end boundary at +${length} lines from start matches ${describeMatches(starts)}`;
+      else reason = "No matching start boundary";
       throw new Error(`edits[${editIndex}]: ${reason} within ±${maxLineShift} lines. Nothing written. Re-read or choose more distinctive boundaries; maxLineShift: 0 requires exact coordinates.`);
     }
     const start = candidates[0];

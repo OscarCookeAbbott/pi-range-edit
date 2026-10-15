@@ -125,6 +125,7 @@ export class RangeEditor {
       const hash = digest(buffer);
       const plan = planEdits(before, proposal.edits, proposal.maxLineShift);
       if (Buffer.byteLength(plan.content, "utf8") > this.config.maxFileBytes) throw new Error("Replacement exceeds the configured file-size limit. Nothing written.");
+      if (plan.content.includes("\0") || !plan.content.isWellFormed()) throw new Error("Replacement requires UTF-8 text without NUL bytes. Nothing written.");
       const version = this.versions.get(proposal.path);
       const acknowledged = proposal.id !== "" && proposal.baseDigest === hash;
       let reason: string | undefined;

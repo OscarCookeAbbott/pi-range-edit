@@ -1,6 +1,6 @@
 {
   "name": "@oscar-robin/pi-range-edit",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Line-range editing for Pi with exact boundary checks and explicit version acknowledgement.",
   "type": "module",
   "license": "MIT",
@@ -13,10 +13,23 @@
   "bugs": {
     "url": "https://github.com/OscarCookeAbbott/pi-range-edit/issues"
   },
-  "keywords": ["pi-package", "pi-extension", "editing", "line-ranges"],
-  "files": ["src/", "README.md", "LICENSE", "CHANGELOG.md", "CONTRIBUTING.md"],
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "editing",
+    "line-ranges"
+  ],
+  "files": [
+    "src/",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md",
+    "CONTRIBUTING.md"
+  ],
   "pi": {
-    "extensions": ["./src/index.ts"]
+    "extensions": [
+      "./src/index.ts"
+    ]
   },
   "engines": {
     "node": ">=22.19.0"

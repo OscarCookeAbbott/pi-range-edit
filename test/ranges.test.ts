@@ -21,6 +21,29 @@ test("duplicates fail closed even when expected coordinates match; exact-coordin
   assert.throws(() => planEdits("header\n start\nold\nend\n", [block], 20), /No matching/);
 });
 
+test("boundary failures distinguish missing starts from mismatched ends, including beyond EOF", () => {
+  assert.throws(() => planEdits("header\nmissing\nold\nend\n", [block], 20), /No matching start boundary/);
+  for (const content of ["header\nstart\nextra\nold\nend\n", "header\nstart\n"]) {
+    assert.throws(() => planEdits(content, [block], 20), /No matching end boundary.*start.*2/);
+  }
+});
+
+test("diagnostics show at most five examples and retain the full match count", () => {
+  assert.throws(() => planEdits("repeat\n".repeat(100), [{ start: { line: 1, text: "repeat" }, newText: "new" }], 100), (error: unknown) => {
+    assert.ok(error instanceof Error);
+    assert.match(error.message, /1–1, 2–2, 3–3, 4–4, 5–5 \(100 matches/);
+    assert.doesNotMatch(error.message, /6–6/);
+    assert.ok(error.message.length < 400);
+    return true;
+  });
+  assert.throws(() => planEdits("start\nwrong\n".repeat(100), [block], 200), (error: unknown) => {
+    assert.ok(error instanceof Error);
+    assert.match(error.message, /1, 3, 5, 7, 9 \(100 matches/);
+    assert.ok(error.message.length < 400);
+    return true;
+  });
+});
+
 test("disjoint batches use original coordinates and validate overlaps before any replacement", () => {
   const original = "one\ntwo\nthree\nfour\nfive\n";
   const result = planEdits(original, [
