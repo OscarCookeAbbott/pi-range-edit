@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.0
+
+- Use two-character base-62 proposal IDs, unique among retained edits, instead of long opaque tokens.
+- Retain the last 10 proposals by default; configure rangeEdit.maxPendingEdits from 1 to 3,844. Evicted/consumed entries are forgotten and IDs may be reused.
+- Keep exact boundary checks, proposal consumption, file-version binding and queued-operation fences unchanged.
+
 ## 0.3.1
 
 - Lead tool descriptions and prompt summaries with efficient whole-line/block editing, and clarify selection between range_edit, edit and write.

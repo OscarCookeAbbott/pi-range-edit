@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from "node:crypto";
+import { createHash } from "node:crypto";
 import { readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
@@ -7,8 +7,11 @@ import { planEdits, type RangeEdit, type ResolvedRange } from "./ranges.ts";
 export interface Config {
   maxLineShift: number;
   maxFileBytes: number;
+  maxPendingEdits: number;
 }
-export const DEFAULT_CONFIG: Config = { maxLineShift: 20, maxFileBytes: 8 * 1024 * 1024 };
+const ID_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+const ID_COUNT = ID_ALPHABET.length ** 2;
+export const DEFAULT_CONFIG: Config = { maxLineShift: 20, maxFileBytes: 8 * 1024 * 1024, maxPendingEdits: 10 };
 export function readConfig(settings: unknown): Config {
   const config = (settings as { rangeEdit?: unknown }).rangeEdit;
   if (config === undefined) return { ...DEFAULT_CONFIG };
@@ -16,9 +19,11 @@ export function readConfig(settings: unknown): Config {
   const values = config as Partial<Config>;
   const maxLineShift = values.maxLineShift === undefined ? DEFAULT_CONFIG.maxLineShift : values.maxLineShift;
   const maxFileBytes = values.maxFileBytes === undefined ? DEFAULT_CONFIG.maxFileBytes : values.maxFileBytes;
+  const maxPendingEdits = values.maxPendingEdits === undefined ? DEFAULT_CONFIG.maxPendingEdits : values.maxPendingEdits;
+  if (!Number.isSafeInteger(maxPendingEdits) || maxPendingEdits < 1 || maxPendingEdits > ID_COUNT) throw new Error(`rangeEdit.maxPendingEdits must be an integer between 1 and ${ID_COUNT}.`);
   if (!Number.isSafeInteger(maxLineShift) || maxLineShift < 0 || maxLineShift > 1000) throw new Error("rangeEdit.maxLineShift must be an integer between 0 and 1000.");
   if (!Number.isSafeInteger(maxFileBytes) || maxFileBytes < 1) throw new Error("rangeEdit.maxFileBytes must be a positive safe integer.");
-  return { maxLineShift, maxFileBytes };
+  return { maxLineShift, maxFileBytes, maxPendingEdits };
 }
 
 export const digest = (content: Uint8Array | string): string => createHash("sha256").update(content).digest("hex");
@@ -69,6 +74,7 @@ export type MutationQueue = <T>(path: string, operation: () => Promise<T>) => Pr
 export class RangeEditor {
   private versions = new Map<string, Version>();
   private proposals = new Map<string, Proposal>();
+  private nextProposalId = 0;
   private queue: MutationQueue;
   config: Config = { ...DEFAULT_CONFIG };
   generation = 0;
@@ -82,6 +88,7 @@ export class RangeEditor {
     this.config = { ...config };
     this.versions.clear();
     this.proposals.clear();
+    this.nextProposalId = 0;
   }
 
   recordRead(path: string, hash: string): void {
@@ -135,10 +142,15 @@ export class RangeEditor {
       const result = { path: proposal.requestedPath, ownEdits: version?.ownEdits ?? 0, ranges: plan.ranges, before, after: plan.content };
       if (reason) {
         if (proposal.id) this.proposals.delete(proposal.id);
-        const id = randomBytes(12).toString("hex");
-        this.proposals.set(id, { ...proposal, id, baseDigest: hash });
+        while (this.proposals.size >= this.config.maxPendingEdits) this.proposals.delete(this.proposals.keys().next().value!);
+        let id: string;
+        do {
+          const value = this.nextProposalId;
+          this.nextProposalId = (value + 1) % ID_COUNT;
+          id = ID_ALPHABET[Math.floor(value / ID_ALPHABET.length)] + ID_ALPHABET[value % ID_ALPHABET.length];
+        } while (this.proposals.has(id));
         // Pending proposals retain edit instructions and digests, never file snapshots.
-        if (this.proposals.size > 32) this.proposals.delete(this.proposals.keys().next().value!);
+        this.proposals.set(id, { ...proposal, id, baseDigest: hash });
         return { ...result, status: "pending", pendingId: id, reason };
       }
       if (before === plan.content) {

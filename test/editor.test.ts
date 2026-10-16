@@ -18,6 +18,39 @@ async function fixture(t: TestContext) {
   return { directory, path, editor };
 }
 
+test("short proposal IDs are unique among the last ten retained edits and the oldest expires", async (t) => {
+  const { directory, editor } = await fixture(t);
+  assert.equal(readConfig({}).maxPendingEdits, 10);
+  const pending: Array<{ id: string; path: string }> = [];
+  for (let index = 0; index < 11; index++) {
+    const path = join(directory, `proposal-${index}.txt`);
+    await writeFile(path, original);
+    const result = await editor.edit({ path, edits }, "/");
+    assert.match(result.pendingId!, /^[0-9a-zA-Z]{2}$/);
+    pending.push({ id: result.pendingId!, path });
+  }
+  assert.equal(new Set(pending.map((item) => item.id)).size, 11);
+  await assert.rejects(editor.reapply(pending[0].id), /expired/);
+  assert.equal(await readFile(pending[0].path, "utf8"), original);
+  assert.equal((await editor.reapply(pending[1].id)).status, "applied");
+  assert.equal((await editor.reapply(pending[10].id)).status, "applied");
+  await assert.rejects(editor.reapply(pending[10].id), /consumed/);
+});
+
+test("proposal retention is configurable and resets do not keep historical IDs", async (t) => {
+  const { path, editor } = await fixture(t);
+  editor.reset(readConfig({ rangeEdit: { maxPendingEdits: 1 } }));
+  const first = await editor.edit({ path, edits }, "/");
+  const second = await editor.edit({ path, edits }, "/");
+  assert.notEqual(first.pendingId, second.pendingId);
+  await assert.rejects(editor.reapply(first.pendingId!), /expired/);
+  editor.reset();
+  const fresh = await editor.edit({ path, edits }, "/");
+  assert.equal(fresh.pendingId, first.pendingId);
+  assert.equal((await editor.reapply(fresh.pendingId!)).status, "applied");
+  await assert.rejects(editor.reapply(fresh.pendingId!), /consumed/);
+});
+
 test("a recorded read allows chained own edits without rereading or blocking", async (t) => {
   const { path, editor } = await fixture(t);
   editor.recordRead(path, digest(original));
@@ -152,12 +185,12 @@ test("invalid replacement text rejects the entire batch before writing or propos
 test("configuration, file limits, invalid encoding and invalid batches fail before writing", async (t) => {
   assert.deepEqual(readConfig({}), DEFAULT_CONFIG);
   assert.equal(readConfig({ rangeEdit: { maxLineShift: 0 } }).maxLineShift, 0);
-  for (const rangeEdit of [null, [], { maxLineShift: -1 }, { maxLineShift: 1001 }, { maxLineShift: 1.5 }, { maxLineShift: "20" }, { maxLineShift: null }, { maxFileBytes: 0 }]) assert.throws(() => readConfig({ rangeEdit }));
+  for (const rangeEdit of [null, [], { maxLineShift: -1 }, { maxLineShift: 1001 }, { maxLineShift: 1.5 }, { maxLineShift: "20" }, { maxLineShift: null }, { maxFileBytes: 0 }, { maxPendingEdits: 0 }, { maxPendingEdits: 3845 }, { maxPendingEdits: 1.5 }, { maxPendingEdits: "10" }, { maxPendingEdits: null }]) assert.throws(() => readConfig({ rangeEdit }));
   const { path, editor } = await fixture(t);
   await assert.rejects(editor.edit({ path, edits, maxLineShift: 21 }, "/"), /configured limit/);
   await assert.rejects(editor.edit({ path, edits: [edits[0], edits[0]] }, "/"), /overlap/);
   assert.equal(await readFile(path, "utf8"), original);
-  editor.reset({ maxLineShift: 20, maxFileBytes: 1 });
+  editor.reset({ ...DEFAULT_CONFIG, maxFileBytes: 1 });
   await assert.rejects(editor.edit({ path, edits }, "/"), /byte.*limit/);
   editor.reset(DEFAULT_CONFIG);
   for (const bytes of [Buffer.from([0xff]), Buffer.from("a\0b")]) {

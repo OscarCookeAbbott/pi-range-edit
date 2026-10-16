@@ -10,7 +10,7 @@ Requires Node 22.19 or newer and Pi. Tested against **Pi 1.2.0**; older Pi relea
 pi install git:github.com/OscarCookeAbbott/pi-range-edit
 ```
 
-Start a new session or run `/reload`. For a pinned release, append `@v0.3.1` to the source. Unpinned installs follow the repository's default branch when running `pi update --extensions`.
+Start a new session or run `/reload`. For a pinned release, append `@v0.4.0` to the source. Unpinned installs follow the repository's default branch when running `pi update --extensions`.
 
 Use `pi install --local <source>` for a project-scoped installation; Pi loads it after project trust is granted. To uninstall:
 
@@ -71,7 +71,7 @@ If the current digest differs from the expected one, or no version was recorded,
 
 Reapply is a **tool action**, not a slash command. Programmatic callers receive structured status, summary, bounded diff/truncation flag, and optional `pendingId`, including for warnings. It takes no new path, boundaries, or replacement text. The proposal binds the canonical file identity, original edit instructions/search radius, and current content digest. If the file changed again, a fresh proposal/ID is returned without writing; if boundaries no longer resolve safely, the tool refuses. Symlink retargeting also refuses. Acknowledgement bypasses only the version warning, never matching/batch validation.
 
-Alternatively, read the current file and submit a new edit. Tokens are consumed after application, expire on session start/reload, `/tree` navigation, or shutdown, and the oldest is evicted when more than 32 proposals exist. They are not persisted. Ledger entries contain digests/counts; proposals contain instructions/digests, not old file contents. Files are read transiently to match, compute replacements/diffs, and verify versions.
+Alternatively, read the current file and submit a new edit. Proposal IDs are two-character base-62 handles, unique only among currently retained proposals. The cache keeps the last 10 proposals by default, evicting the oldest at capacity. Entries are consumed after application and cleared on session start/reload, `/tree` navigation or shutdown. IDs may be reused once their entries leave the cache; they are not persistent identifiers. Always use the ID from the proposal being reviewed. Ledger entries contain digests/counts; proposals contain instructions/digests, not old file contents. Files are read transiently to match, compute replacements/diffs, and verify versions.
 
 ## Configuration
 
@@ -81,12 +81,13 @@ Merge into `~/.pi/agent/settings.json`, or trusted project `.pi/settings.json`:
 {
   "rangeEdit": {
     "maxLineShift": 20,
-    "maxFileBytes": 8388608
+    "maxFileBytes": 8388608,
+    "maxPendingEdits": 10
   }
 }
 ```
 
-Run `/reload` after changing settings. `maxLineShift` must be an integer from 0 to 1000; `maxFileBytes` a positive safe integer (default 8 MiB, for both original and resulting files). Invalid configuration warns and uses defaults. The tool supports existing UTF-8 regular files without NUL bytes. Replacement output must meet the same text constraint; NUL bytes and malformed Unicode are rejected before writing or creating a pending proposal. Use `write` for new/empty-file creation.
+Run `/reload` after changing settings. `maxLineShift` must be an integer from 0 to 1000; `maxFileBytes` a positive safe integer (default 8 MiB, for both original and resulting files). `maxPendingEdits` must be an integer from 1 to 3,844 (default 10). Invalid configuration warns and uses defaults. The tool supports existing UTF-8 regular files without NUL bytes. Replacement output must meet the same text constraint; NUL bytes and malformed Unicode are rejected before writing or creating a pending proposal. Use `write` for new/empty-file creation.
 
 ## Safety boundaries
 
