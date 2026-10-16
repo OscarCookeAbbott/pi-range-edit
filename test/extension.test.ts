@@ -60,7 +60,11 @@ async function harness(t: TestContext, settings: unknown = {}) {
 test("the extension registers only range_edit and observes ordinary read/edit/write without overrides", async (t) => {
   const h = await harness(t);
   assert.deepEqual([...h.tools.keys()], ["range_edit"]);
-  assert.equal(h.tools.get("range_edit")!.executionMode, "sequential");
+  const tool = h.tools.get("range_edit")!;
+  assert.equal(tool.executionMode, "sequential");
+  assert.equal(tool.promptSnippet, "Efficiently edit whole lines and blocks using line numbers and exact boundary text.");
+  assert.ok(tool.description.startsWith(tool.promptSnippet!));
+  assert.match(tool.promptGuidelines!.join("\n"), /Prefer range_edit.*use edit for substring replacements and write for new files or complete rewrites/);
   await h.native("read", { path: h.path });
   await h.native("edit", { path: h.path, edits: [{ oldText: "old", newText: "native" }] });
   const result = await h.range({ path: h.path, edits });

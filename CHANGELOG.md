@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.1
+
+- Lead tool descriptions and prompt summaries with efficient whole-line/block editing, and clarify selection between range_edit, edit and write.
+
 ## 0.3.0
 
 - Report actual added/deleted diff lines on success, with signed offsets only for relocated ranges.

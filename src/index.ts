@@ -132,10 +132,10 @@ export default function rangeEditExtension(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "range_edit",
     label: "Range edit",
-    description: "Replace whole-line ranges using ordinary 1-based line numbers and exact first/last line text, without repeating the old interior. End is inclusive; omit end for one line. Searches within a bounded radius using the SAME offset for both boundaries; rejects missing/ambiguous matches and overlapping edits. All edits resolve against one original file. Normal read/read_symbol/read_enclosing establish digest-only version tracking; recorded range/edit/write mutations can chain without rereading. Unaccounted-for changes or an unverified file return a proposed diff and pendingId without writing. Review current code/diff, then action=reapply with only pendingId to acknowledge that exact version; further changes require a fresh acknowledgement. No file snapshots, hashed line labels, or tool overrides.",
-    promptSnippet: "Edit inclusive line ranges with exact boundary text and bounded line-number relocation.",
+    description: "Efficiently edit whole lines and blocks using line numbers and exact boundary text. Use ordinary 1-based coordinates without repeating the old interior. End is inclusive; omit end for one line. Searches within a bounded radius using the SAME offset for both boundaries; rejects missing/ambiguous matches and overlapping edits. All edits resolve against one original file. Normal read/read_symbol/read_enclosing establish digest-only version tracking; recorded range/edit/write mutations can chain without rereading. Unaccounted-for changes or an unverified file return a proposed diff and pendingId without writing. Review current code/diff, then action=reapply with only pendingId to acknowledge that exact version; further changes require a fresh acknowledgement. No file snapshots, hashed line labels, or tool overrides.",
+    promptSnippet: "Efficiently edit whole lines and blocks using line numbers and exact boundary text.",
     promptGuidelines: [
-      "Use range_edit for whole-line/block replacements when repeating the full old block is unnecessary; retain edit for substring replacements.",
+      "Prefer range_edit for whole-line/block replacements in existing files; use edit for substring replacements and write for new files or complete rewrites.",
       "Use exact single-line boundary text, including indentation. Review the diff/current code before reapplying a warning; never treat reapply as an automatic retry.",
       "Batch disjoint same-file ranges in one call against original coordinates. Missing/ambiguous boundaries require a reread or more distinctive boundaries, not acknowledgement.",
     ],
