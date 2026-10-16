@@ -4,12 +4,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { validateToolArguments, type JsonObject } from "@earendil-works/pi-ai";
-import { createReadToolDefinition, createEditToolDefinition, createWriteToolDefinition, type ExtensionAPI, type ExtensionToolContext, type ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { createReadToolDefinition, createEditToolDefinition, createWriteToolDefinition, initTheme, renderDiff, type ExtensionAPI, type ExtensionToolContext, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { TSchema } from "typebox";
 import extension from "../src/index.ts";
+initTheme("dark");
 const original = "header\nstart\nold\nend\nfooter\n";
 const edits = [{ start: { line: 2, text: "start" }, end: { line: 4, text: "end" }, newText: "start\nnew\nend" }];
-interface Details { status: string; path: string; pendingId?: string; summary: string; diff: string; ranges: { start: number; end: number }[] }
+interface Details { status: string; path: string; pendingId?: string; summary: string; diff: string; ownEdits: number; additions: number; deletions: number; ranges: { start: number; end: number }[] }
 
 async function harness(t: TestContext, settings: unknown = {}) {
   const directory = await mkdtemp(join(tmpdir(), "pi-range-edit-integration-"));
@@ -64,13 +65,82 @@ test("the extension registers only range_edit and observes ordinary read/edit/wr
   await h.native("edit", { path: h.path, edits: [{ oldText: "old", newText: "native" }] });
   const result = await h.range({ path: h.path, edits });
   assert.equal(result.details.status, "applied");
-  assert.match(result.details.summary, /1 recorded tool edit/);
+  assert.equal(result.content[0].text, "Success. +1 -1 lines.");
+  assert.equal(result.details.ownEdits, 1);
   assert.equal(await readFile(h.path, "utf8"), original.replace("old", "new"));
   assert.ok(!("before" in result.details) && !("after" in result.details));
 
   const created = join(h.directory, "created.txt");
   await h.native("write", { path: created, content: original });
   assert.equal((await h.range({ path: created, edits })).details.status, "applied");
+});
+
+test("Pi error results with empty details render the actual refusal", async (t) => {
+  const h = await harness(t);
+  const text = "edits[0]: No matching end boundary. Nothing written.";
+  const result = { content: [{ type: "text", text }], details: {} };
+  const render = h.tools.get("range_edit")!.renderResult! as Function;
+  for (const expanded of [false, true]) {
+    assert.equal(render(result, { expanded }, { fg: (_color: string, text: string) => text }, {}).render(200).join("\n").trimEnd(), text);
+  }
+});
+
+test("successful feedback counts actual changes without adding diff bodies to model context", async (t) => {
+  for (const [newText, expected, additions, deletions] of [
+    ["new", "Success. +1 -1 lines.", 1, 1],
+    ["old\nextra", "Success. +1 -0 lines.", 1, 0],
+    ["", "Success. +0 -1 lines.", 0, 1],
+    ["old", "No changes.", 0, 0],
+    [Array.from({ length: 300 }, (_, i) => `new ${i}`).join("\n"), "Success. +300 -1 lines.", 300, 1],
+  ] as const) {
+    const h = await harness(t);
+    await h.native("read", { path: h.path });
+    const result = await h.range({ path: h.path, edits: [{ start: { line: 3, text: "old" }, newText }] });
+    assert.equal(result.content[0].text, expected);
+    assert.equal(result.details.additions, additions);
+    assert.equal(result.details.deletions, deletions);
+    const tool = h.tools.get("range_edit")!;
+    const render = tool.renderResult! as Function;
+    const theme = { fg: (_color: string, text: string) => text };
+    const collapsed = render(result, { expanded: false }, theme, {}).render(200).map((line: string) => line.trimEnd()).join("\n");
+    assert.ok(collapsed.startsWith(expected));
+    if (additions || deletions) assert.match(collapsed, /old/);
+    else assert.equal(collapsed, expected);
+    const expanded = render(result, { expanded: true }, theme, {}).render(200).join("\n");
+    assert.ok(expanded.includes(h.path));
+    if (additions || deletions) {
+      assert.match(result.details.diff, /old/);
+      assert.match(expanded, /Range 1: requested/);
+      assert.match(expanded, /old/);
+    }
+  }
+});
+
+test("TUI uses built-in diff highlighting and bold/accented call headers", async (t) => {
+  const h = await harness(t);
+  const tool = h.tools.get("range_edit")!;
+  const theme = { fg: (color: string, text: string) => `<${color}>${text}</${color}>`, bold: (text: string) => `<bold>${text}</bold>` };
+  const call = (tool.renderCall! as Function)({ path: "src/example.ts" }, theme, {}).render(200).join("\n").trimEnd();
+  assert.equal(call, "<toolTitle><bold>range_edit</bold></toolTitle> <accent>src/example.ts</accent>");
+  await h.native("read", { path: h.path });
+  const result = await h.range({ path: h.path, edits });
+  const rendered = (tool.renderResult! as Function)(result, { expanded: false }, theme, {}).render(200).map((line: string) => line.trimEnd()).join("\n");
+  assert.ok(rendered.includes(renderDiff(result.details.diff)));
+  assert.equal(result.content[0].text, "Success. +1 -1 lines.");
+});
+
+test("relocation reports signed offsets without repeating exact ranges", async (t) => {
+  const h = await harness(t);
+  await h.native("write", { path: h.path, content: `prefix\n${original}` });
+  const shifted = await h.range({ path: h.path, edits });
+  assert.equal(shifted.content[0].text, "Success with +1 line offset. +1 -1 lines.");
+  const batch = await h.range({ path: h.path, edits: [
+    { start: { line: 2, text: "header" }, newText: "header" },
+    { start: { line: 5, text: "footer" }, newText: "tail" },
+  ] });
+  assert.equal(batch.content[0].text, "Success. +1 -1 lines. Range 2 offset +1.");
+  const negative = await h.range({ path: h.path, edits: [{ start: { line: 5, text: "new" }, newText: "final" }] });
+  assert.equal(negative.content[0].text, "Success with -1 line offset. +1 -1 lines.");
 });
 
 test("unexpected interior changes return a reviewable warning; reapply cannot alter the saved instructions", async (t) => {
@@ -92,6 +162,17 @@ test("unexpected interior changes return a reviewable warning; reapply cannot al
   assert.equal(applied.structuredContent.status, "applied");
   assert.equal(applied.structuredContent.pendingId, undefined);
   assert.equal(await readFile(h.path, "utf8"), original.replace("old", "new"));
+});
+
+test("large unverified proposals keep bounded review evidence and do not write", async (t) => {
+  const h = await harness(t);
+  const pending = await h.range({ path: h.path, edits: [{ start: { line: 3, text: "old" }, newText: Array.from({ length: 300 }, (_, i) => `new ${i}`).join("\n") }] });
+  assert.equal(pending.isError, true);
+  assert.match(pending.content[0].text, /Nothing written.*Pending edit:/);
+  assert.match(pending.content[0].text, /Diff truncated.*Read the affected file ranges/);
+  assert.equal(pending.structuredContent.diffTruncated, true);
+  assert.match(pending.content[0].text, /new 0/);
+  assert.equal(await readFile(h.path, "utf8"), original);
 });
 
 test("unstable reads and unexpected post-tool bytes never become trusted agent versions", async (t) => {

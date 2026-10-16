@@ -1,5 +1,5 @@
 import { realpath } from "node:fs/promises";
-import { createEditToolDefinition, generateDiffString, generateUnifiedPatch, truncateHead, withFileMutationQueue, type ExtensionAPI, type ExtensionContext, type ExtensionToolContext } from "@earendil-works/pi-coding-agent";
+import { createEditToolDefinition, generateDiffString, generateUnifiedPatch, renderDiff, truncateHead, withFileMutationQueue, type ExtensionAPI, type ExtensionContext, type ExtensionToolContext } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { absolutePath, DEFAULT_CONFIG, digest, RangeEditor, readConfig, readTextFile, type EditResult } from "./editor.ts";
@@ -36,6 +36,9 @@ interface Details {
   diff: string;
   patch: string;
   ranges: EditResult["ranges"];
+  ownEdits: number;
+  additions: number;
+  deletions: number;
 }
 const readTools = new Set(["read", "read_symbol", "read_enclosing"]);
 
@@ -156,32 +159,60 @@ export default function rangeEditExtension(pi: ExtensionAPI): void {
         if (params.pendingId !== undefined || !params.path || !params.edits) throw new Error("Edit requires path and edits; pendingId is only for reapply.");
         result = await editor.edit({ path: params.path, edits: params.edits as RangeEdit[], maxLineShift: params.maxLineShift }, ctx.cwd, signal);
       }
-      let summary = result.status === "pending" ? `${result.reason} Nothing written. Pending edit: ${result.pendingId}. Review the diff/current code, then call range_edit with action: reapply and this pendingId.` : result.status === "unchanged" ? `No change needed in ${result.path}.` : `Applied ${result.ranges.length} range edit(s) to ${result.path}.`;
-      if (result.ownEdits) summary += ` ${result.ownEdits} recorded tool edit(s) since the last read/acknowledgement; this alone does not block editing.`;
-      for (const range of result.ranges) summary += `\nRange ${range.editIndex + 1}: requested ${range.requestedStart}–${range.requestedEnd}; resolved ${range.start}–${range.end}${range.shift ? ` (shift ${range.shift > 0 ? "+" : ""}${range.shift})` : ""}; replacement ${range.newEnd < range.newStart ? "deleted" : `${range.newStart}–${range.newEnd}`}.`;
+      const { diff } = generateDiffString(result.before, result.after);
+      const patch = generateUnifiedPatch(result.path, result.before, result.after);
+      const lines = diff.split("\n");
+      const additions = lines.filter((line) => line.startsWith("+")).length;
+      const deletions = lines.filter((line) => line.startsWith("-")).length;
+      const relocated = result.ranges.filter((range) => range.shift !== 0);
+      const signed = (offset: number) => `${offset > 0 ? "+" : ""}${offset}`;
+      let summary: string;
+      if (result.status === "pending") {
+        summary = `${result.reason} Nothing written. Pending edit: ${result.pendingId}. Review the diff/current code, then call range_edit with action: reapply and this pendingId.`;
+      } else if (result.status === "unchanged") {
+        summary = "No changes.";
+      } else {
+        summary = result.ranges.length === 1 && relocated.length
+          ? `Success with ${signed(relocated[0].shift)} line offset.`
+          : "Success.";
+        summary += ` +${additions} -${deletions} lines.`;
+      }
+      if (relocated.length && !(result.status === "applied" && result.ranges.length === 1)) {
+        summary += ` ${relocated.map((range) => `Range ${range.editIndex + 1} offset ${signed(range.shift)}`).join("; ")}.`;
+      }
       if (result.status === "applied") {
         const warning = reportMutation(result);
         if (warning) summary += `\nWarning: ${warning}`;
       }
-      const { diff } = generateDiffString(result.before, result.after);
-      const patch = generateUnifiedPatch(result.path, result.before, result.after);
       const shown = truncateHead(diff, { maxLines: 200, maxBytes: 12000 });
-      const text = `${summary}${diff ? `\n\n${shown.content}` : ""}${shown.truncated ? "\n[Diff truncated. Read the affected file ranges before proceeding.]" : ""}`;
+      const review = result.status === "pending";
+      const text = `${summary}${review && diff ? `\n\n${shown.content}` : ""}${review && shown.truncated ? "\n[Diff truncated. Read the affected file ranges before proceeding.]" : ""}`;
       return {
         content: [{ type: "text", text }],
-        isError: result.status === "pending",
+        isError: review,
         structuredContent: { status: result.status, path: result.path, summary, diff: shown.content, diffTruncated: shown.truncated, ...(result.pendingId ? { pendingId: result.pendingId } : {}) },
-        details: { status: result.status, path: result.path, pendingId: result.pendingId, summary, diff, patch, ranges: result.ranges } satisfies Details,
+        details: { status: result.status, path: result.path, pendingId: result.pendingId, summary, diff, patch, ranges: result.ranges, ownEdits: result.ownEdits, additions, deletions } satisfies Details,
       };
     },
     renderCall(args, theme) {
-      return new Text(theme.fg("toolTitle", args.action === "reapply" ? `range_edit reapply ${args.pendingId ?? ""}` : `range_edit ${args.path ?? ""}`), 0, 0);
+      const target = args.action === "reapply" ? theme.fg("muted", " reapply ") + theme.fg("accent", args.pendingId ?? "...") : ` ${theme.fg("accent", args.path ?? "...")}`;
+      return new Text(theme.fg("toolTitle", theme.bold("range_edit")) + target, 0, 0);
     },
     renderResult(result, { expanded }, theme) {
       const details = result.details as Details | undefined;
-      if (!details) return new Text(result.content.flatMap((item) => item.type === "text" ? [item.text] : []).join("\n"), 0, 0);
-      const text = expanded && details.diff ? `${details.summary}\n\n${truncateHead(details.diff, { maxLines: 500, maxBytes: 30000 }).content}` : details.summary;
-      return new Text(theme.fg(details.status === "pending" ? "warning" : "muted", text), 0, 0);
+      if (typeof details?.summary !== "string") return new Text(theme.fg("error", result.content.flatMap((item) => item.type === "text" ? [item.text] : []).join("\n")), 0, 0);
+      const lines = details.summary.split("\n").map((line) => theme.fg(details.status === "pending" || line.startsWith("Warning:") ? "warning" : "toolOutput", line));
+      if (expanded) {
+        lines.push(theme.fg("accent", details.path));
+        if (details.ownEdits) lines.push(theme.fg("muted", `${details.ownEdits} recorded tool edit(s) since the last read/acknowledgement.`));
+        for (const range of details.ranges) lines.push(theme.fg("muted", `Range ${range.editIndex + 1}: requested ${range.requestedStart}–${range.requestedEnd}; resolved ${range.start}–${range.end}; replacement ${range.newEnd < range.newStart ? "deleted" : `${range.newStart}–${range.newEnd}`}.`));
+      }
+      if (details.diff) {
+        const shown = truncateHead(details.diff, { maxLines: expanded ? 500 : 200, maxBytes: expanded ? 30000 : 12000 });
+        lines.push("", renderDiff(shown.content, { filePath: details.path }));
+        if (shown.truncated) lines.push(theme.fg("warning", expanded ? "[Diff truncated. Read the affected file ranges.]" : "[Diff truncated. Expand for more. Read the affected file ranges if still truncated.]"));
+      }
+      return new Text(lines.join("\n"), 0, 0);
     },
   });
 }

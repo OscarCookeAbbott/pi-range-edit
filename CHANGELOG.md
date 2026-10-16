@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.0
+
+- Report actual added/deleted diff lines on success, with signed offsets only for relocated ranges.
+- Keep successful diff bodies, full coordinates and recorded-edit counts out of model text; preserve bounded review evidence for pending proposals.
+- Use Pi's built-in coloured/intra-line diff renderer and bold/accented call headers in the TUI, with richer expanded details.
+- Render actual refusal text when Pi supplies empty error details instead of displaying undefined output.
+
 ## 0.2.0
 
 - Reject NUL bytes and malformed Unicode in replacement output before writing or creating proposals.
